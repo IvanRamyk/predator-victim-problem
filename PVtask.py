@@ -1,43 +1,36 @@
 import os
 import pickle
-import keyboard
-import numpy as np
 import gym
-import cv2
 import ray
 import ray.rllib.agents.a3c as a3c
-import ray.rllib.agents.sac as sac
-import ray.rllib.agents.pg as pg
-import ray.rllib.agents.ddpg as ddpg
 from ray.rllib.models import ModelCatalog
 from ray.rllib.models.tf.tf_modelv2 import TFModelV2
 from ray.tune.registry import register_env
 import tensorflow as tf
-from PredatorVictim import PredatorVictim
+from PredatorVictim.PredatorVictim import PredatorVictim
+from PredatorVictim.constants import default_params
 from evaluate import evaluate
 
 
 ready_to_exit = False
+
+
 def press_key_exit(_q):
     global ready_to_exit
-    ready_to_exit=True
+    ready_to_exit = True
 
 
 class PredatorVictimModel(TFModelV2):
     def __init__(self, obs_space, action_space, num_outputs, model_config, name):
-        # raise Exception("Hack Pentagon")
-        super(PredatorVictimModel, self).__init__(obs_space, action_space, num_outputs, model_config,name)
+        super(PredatorVictimModel, self).__init__(obs_space, action_space, num_outputs, model_config, name)
         input_layer = tf.keras.layers.Input(shape=obs_space.shape, name="observations")
-        hidden_layer1 = tf.keras.layers.Dense(512, activation='relu')(input_layer)
-        hidden_layer2 = tf.keras.layers.Dense(512, activation='relu')(hidden_layer1)
-        hidden_layer3 = tf.keras.layers.Dense(512, activation='relu')(hidden_layer2)
-        output_mean = tf.keras.layers.Dense(2, activation='tanh')(hidden_layer3)
-        output_std = tf.keras.layers.Dense(2, activation='sigmoid')(hidden_layer3)
+        hidden_layer1 = tf.keras.layers.Dense(500, activation='relu')(input_layer)
+        output_mean = tf.keras.layers.Dense(2, activation='tanh')(hidden_layer1)
+        output_std = tf.keras.layers.Dense(2, activation='sigmoid')(hidden_layer1)
         output_layer = tf.keras.layers.Concatenate(axis=1)([output_mean, output_std])
-        value_layer = tf.keras.layers.Dense(1)(hidden_layer3)
+        value_layer = tf.keras.layers.Dense(1)(hidden_layer1)
         self.base_model = tf.keras.Model(input_layer, [output_layer, value_layer])
         self.register_variables(self.base_model.variables)
-        print(num_outputs)
 
     def forward(self, input_dict, state, seq_lens):
         model_out, self._value_out = self.base_model(input_dict["obs"])
@@ -52,8 +45,8 @@ def gen_policy(PVEnv, i):
     config = {
         "model": {"custom_model": "PredatorVictimModel_{}".format(i)},
     }
-    
     return None, PVEnv.observation_space, PVEnv.action_space, config
+
 
 def policy_mapping_fn(agent_id):
     if agent_id == 'predator':
@@ -62,11 +55,11 @@ def policy_mapping_fn(agent_id):
         return "policy_victim"
 
 
-model_file = 'PredatorVictim_A3C_custom_hidden3_equal_velocity.pickle'
+model_file = 'PredatorVictim_CA.pickle'
 params = {'predator': {'max_vel': 0.01, 'max_acceleration':0.001},
-          'victim': {'max_vel': 0.01, 'max_acceleration': 0.001},
-          'reward_scale': 0.1,
-          'max_steps': 2000,
+          'victim': {'max_vel': 0.002, 'max_acceleration': 0.0001},
+          'reward_scale': 0.01,
+          'max_steps': 1000,
           'is_continuous': True,
           'catch_distance': 0.1}
 
@@ -74,15 +67,20 @@ params = {'predator': {'max_vel': 0.01, 'max_acceleration':0.001},
 ray.init(include_dashboard=False)
 ModelCatalog.register_custom_model("CartpoleModel", PredatorVictimModel)
 PVEnv = gym.make("PredatorVictim-v0", params=params)
-register_env("PredatorVictimEnv", lambda _: PVEnv)
+register_env("PredatorVictimEnv", lambda _: PredatorVictim(params=default_params))
 
-trainer = a3c.A3CTrainer(env="PredatorVictimEnv", config={
+trainer = a3c.A3CTrainer(
+    env="PredatorVictimEnv",
+    config={
         "multiagent": {
-            "policies": {"policy_predator": gen_policy(PVEnv, 0),
-                         "policy_victim": gen_policy(PVEnv, 1)},
-            "policy_mapping_fn": policy_mapping_fn,
+            "policies": {
+                "policy_predator": gen_policy(PVEnv, 0),
+                "policy_victim": gen_policy(PVEnv, 1)
             },
-    })
+            "policy_mapping_fn": policy_mapping_fn,
+        },
+    }
+)
 
 if os.path.isfile(model_file):
     weights = pickle.load(open(model_file, "rb"))
@@ -91,21 +89,16 @@ if os.path.isfile(model_file):
     print("model restored!")
 
 
-str = "train"
-try:
-    if str == "train":
-        for i in range(10000):
-            if ready_to_exit:
-                break
-            rest = trainer.train()
-            print(rest['policy_reward_mean'])
+while True:
+    try:
+        rest = trainer.train()
+        print(rest['policy_reward_mean'])
+    except KeyboardInterrupt:
+        break
 
-        weights = trainer.save_to_object()
-        pickle.dump(weights, open(model_file, 'wb'))
-        print('Model saved')
-    else:
-        evaluate(trainer, PVEnv, video_file='../videos/Predator_Victim_A3C')
-except:
-    weights = trainer.save_to_object()
-    pickle.dump(weights, open(model_file, 'wb'))
-    print('Model saved')
+weights = trainer.save_to_object()
+pickle.dump(weights, open(model_file, 'wb'))
+print('Model saved')
+
+
+evaluate(trainer, PVEnv, video_file='../videos/Predator_Victim_A3C')

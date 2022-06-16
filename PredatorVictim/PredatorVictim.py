@@ -1,22 +1,22 @@
 from gym import spaces
 import numpy as np
-import time
 import gym
 from gym.utils import seeding
+from numpy import float32
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 
 
-class PredatorVictim(gym.Env, MultiAgentEnv):
+class PredatorVictim(MultiAgentEnv, gym.Env):
 
     metadata = {'render.modes': ['human']}
 
     def __init__(self, **kwargs):
+        super().__init__()
         self.params = kwargs.get("params")
-        self.observation_space = spaces.Box(-np.ones(8), np.ones(8))
-        if self.params['is_continuous']:
-            self.action_space = spaces.Box(low=-1, high=1, shape=(2,))
-        else:
-            self.action_space = spaces.Discrete(4)
+        self.agents = ["predator", "victim"]
+        self._agent_ids = ["predator", "victim"]
+        self.observation_space = spaces.Box(-np.ones(8), np.ones(8), shape=(8,))
+        self.action_space = spaces.Box(low=-1, high=1, shape=(2,))
         self.entities = dict()
         self.n_steps = 0
         self.seed()
@@ -29,7 +29,7 @@ class PredatorVictim(gym.Env, MultiAgentEnv):
 
     def create_entity(self, name, color):
         res = dict()
-        res['pos'] = 2*self.np_random.rand(2)-1
+        res['pos'] = 2 * self.np_random.rand(2)-1
         res['vel'] = 2 * self.np_random.rand(2) - 1
         res['vel'] /= np.linalg.norm(res['vel'])
         res['vel'] *= self.np_random.rand() * self.params[name]['max_vel']
@@ -40,7 +40,7 @@ class PredatorVictim(gym.Env, MultiAgentEnv):
         return np.concatenate((self.entities["predator"]["pos"],
                                self.entities["predator"]["vel"]/self.params["predator"]["max_vel"],
                                self.entities["victim"]["pos"],
-                               self.entities["victim"]["vel"]/self.params["victim"]["max_vel"]))
+                               self.entities["victim"]["vel"]/self.params["victim"]["max_vel"]), dtype=float32)
 
     def reset(self):
         self.n_steps = 0
@@ -104,6 +104,7 @@ class PredatorVictim(gym.Env, MultiAgentEnv):
         obs = {"predator": observation, "victim": observation}
         dones = {"__all__": done}
 
+        # return self.observation_space.sample(), rewards, dones, {}
         return obs, rewards, dones, {}
 
     def render(self, mode='human'):
@@ -126,3 +127,15 @@ class PredatorVictim(gym.Env, MultiAgentEnv):
         if self.viewer:
             self.viewer.close()
             self.viewer = None
+
+    def action_space_sample(self, agent_ids: list = None):
+        return {
+            "predator": self.action_space.sample(),
+            "victim": self.action_space.sample(),
+        }
+
+    def observation_space_sample(self, agent_ids: list = None):
+        return {
+            "predator": self.observation_space.sample(),
+            "victim": self.observation_space.sample(),
+        }
